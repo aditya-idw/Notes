@@ -297,6 +297,16 @@
             text-overflow: ellipsis;
         }
 
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+
         @media (max-width: 768px) {
             .main-content {
                 grid-template-columns: 1fr;
@@ -322,6 +332,44 @@
             padding-top: 20px;
             border-top: 1px solid #e2e8f0;
         }
+
+        .github-setup {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            font-size: 0.9rem;
+        }
+
+        .github-setup summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: #4f46e5;
+            margin-bottom: 10px;
+        }
+
+        .github-setup input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            margin: 5px 0;
+            font-size: 0.9rem;
+        }
+
+        .sync-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-top: 10px;
+        }
+
+        .sync-status.success { color: #10b981; }
+        .sync-status.error { color: #ef4444; }
+        .sync-status.syncing { color: #f59e0b; }
 
         .export-btn {
             background: linear-gradient(135deg, #8b5cf6, #7c3aed);
@@ -361,9 +409,24 @@
                     <button class="btn export-btn" onclick="importNotes()">
                         📂 Import Notes
                     </button>
-                    <button class="btn btn-secondary" onclick="app.autoBackupNotes()">
-                        💾 Backup Now
+                    <button class="btn btn-secondary" onclick="app.manualBackup()">
+                        💾 Local Backup
                     </button>
+                    <button class="btn export-btn" onclick="app.syncToGitHub()">
+                        🔄 Sync to GitHub
+                    </button>
+                    
+                    <details class="github-setup">
+                        <summary>⚙️ GitHub Sync Setup</summary>
+                        <input type="text" id="githubToken" placeholder="GitHub Personal Access Token" 
+                               value="" onchange="app.saveGitHubConfig()">
+                        <input type="text" id="githubRepo" placeholder="username/repo-name" 
+                               value="" onchange="app.saveGitHubConfig()">
+                        <div style="font-size: 0.8rem; color: #64748b; margin-top: 8px;">
+                            <a href="#" onclick="app.showGitHubSetupGuide(); return false;">📖 How to set up GitHub sync</a>
+                        </div>
+                        <div id="syncStatus" class="sync-status"></div>
+                    </details>
                 </div>
             </div>
             
@@ -455,38 +518,87 @@
             }
 
             setupAutoBackup() {
-                // Auto-backup every 30 seconds if there are changes
-                setInterval(() => {
-                    const currentTime = Date.now();
-                    const noteCount = Object.keys(this.notes).length;
-                    
-                    if (noteCount > 0 && currentTime - this.lastBackupTime > this.backupInterval) {
-                        this.autoBackupNotes();
-                    }
-                }, 10000); // Check every 10 seconds
+                // Show backup reminder occasionally
+                this.lastBackupReminder = parseInt(localStorage.getItem('lastBackupReminder') || '0');
+                this.checkBackupReminder();
             }
 
             triggerAutoBackup() {
-                // Trigger backup after changes, but not too frequently
-                clearTimeout(this.autoBackupTimeout);
-                this.autoBackupTimeout = setTimeout(() => {
-                    this.autoBackupNotes();
-                }, 5000); // Backup 5 seconds after last change
+                // Instead of auto-downloading, show a backup reminder when needed
+                this.checkBackupReminder();
             }
 
-            autoBackupNotes() {
+            checkBackupReminder() {
                 const currentTime = Date.now();
                 const noteCount = Object.keys(this.notes).length;
+                const oneHour = 60 * 60 * 1000;
                 
-                if (noteCount === 0) return;
+                // Show reminder if:
+                // - Have notes AND
+                // - Haven't shown reminder in last hour AND  
+                // - Have made changes recently
+                if (noteCount > 0 && 
+                    currentTime - this.lastBackupReminder > oneHour &&
+                    this.hasRecentChanges()) {
+                    
+                    this.showBackupReminder();
+                    this.lastBackupReminder = currentTime;
+                    localStorage.setItem('lastBackupReminder', currentTime.toString());
+                }
+            }
+
+            hasRecentChanges() {
+                const oneHour = 60 * 60 * 1000;
+                const currentTime = Date.now();
                 
-                // Don't backup too frequently
-                if (currentTime - this.lastBackupTime < 30000) return;
+                return Object.values(this.notes).some(note => 
+                    currentTime - new Date(note.modified).getTime() < oneHour
+                );
+            }
+
+            showBackupReminder() {
+                const noteCount = Object.keys(this.notes).length;
+                const reminder = document.createElement('div');
+                reminder.style.cssText = `
+                    position: fixed; top: 20px; right: 20px; z-index: 1001;
+                    background: linear-gradient(135deg, #10b981, #059669);
+                    color: white; padding: 15px 20px; border-radius: 12px;
+                    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+                    max-width: 300px; font-size: 14px;
+                    animation: slideIn 0.3s ease;
+                `;
                 
+                reminder.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span>💾</span>
+                        <div>
+                            <strong>Backup Reminder</strong><br>
+                            You have ${noteCount} notes. Consider backing up!
+                        </div>
+                        <button onclick="this.parentElement.parentElement.remove(); app.manualBackup();" 
+                                style="background: rgba(255,255,255,0.2); border: none; color: white; 
+                                       padding: 5px 10px; border-radius: 6px; cursor: pointer; margin-left: 10px;">
+                            Backup Now
+                        </button>
+                    </div>
+                `;
+                
+                document.body.appendChild(reminder);
+                
+                // Auto-hide after 10 seconds
+                setTimeout(() => {
+                    if (reminder.parentElement) {
+                        reminder.style.animation = 'slideOut 0.3s ease';
+                        setTimeout(() => reminder.remove(), 300);
+                    }
+                }, 10000);
+            }
+
+            manualBackup() {
                 const backupData = {
                     backup_timestamp: new Date().toISOString(),
                     backup_date: new Date().toLocaleString(),
-                    notes_count: noteCount,
+                    notes_count: Object.keys(this.notes).length,
                     notes: this.notes,
                     app_version: "1.0"
                 };
@@ -496,17 +608,11 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `notes_auto_backup_${new Date().toISOString().split('T')[0]}.json`;
-                a.style.display = 'none';
-                document.body.appendChild(a);
+                a.download = `notes_backup_${new Date().toISOString().split('T')[0]}.json`;
                 a.click();
-                document.body.removeChild(a);
                 URL.revokeObjectURL(url);
                 
-                this.lastBackupTime = currentTime;
-                this.updateSaveStatus('Auto-backup completed');
-                
-                // Reset status after 3 seconds
+                this.updateSaveStatus('Backup downloaded');
                 setTimeout(() => {
                     this.updateSaveStatus('All changes saved');
                 }, 3000);
