@@ -956,7 +956,22 @@ Security: Your token is stored locally in your browser and only used to access y
         }
 
         // Initialize the app
-        const app = new NotesApp();
+        let app;
+        
+        // Wait for DOM to be ready
+        document.addEventListener('DOMContentLoaded', function() {
+            app = new NotesApp();
+            console.log('Notes app initialized');
+        });
+        
+        // Also initialize immediately if DOM is already ready
+        if (document.readyState === 'loading') {
+            // DOM is still loading, wait for DOMContentLoaded
+        } else {
+            // DOM is already ready
+            app = new NotesApp();
+            console.log('Notes app initialized immediately');
+        }
 
         // Global functions
         function createNewNote() {
