@@ -358,6 +358,12 @@
                     <button class="btn export-btn" onclick="exportAllNotes()">
                         📁 Export All Notes
                     </button>
+                    <button class="btn export-btn" onclick="importNotes()">
+                        📂 Import Notes
+                    </button>
+                    <button class="btn btn-secondary" onclick="app.autoBackupNotes()">
+                        💾 Backup Now
+                    </button>
                 </div>
             </div>
             
@@ -416,9 +422,13 @@
                 this.notes = {};
                 this.currentNoteId = null;
                 this.saveTimeout = null;
+                this.autoBackupTimeout = null;
+                this.lastBackupTime = 0;
+                this.backupInterval = 30000; // 30 seconds
                 this.loadNotes();
                 this.renderNotesList();
                 this.setupAutoSave();
+                this.setupAutoBackup();
             }
 
             loadNotes() {
@@ -437,10 +447,69 @@
                 try {
                     window.localStorage.setItem('personalNotes', JSON.stringify(this.notes));
                     this.updateSaveStatus('All changes saved');
+                    this.triggerAutoBackup();
                 } catch (e) {
                     console.error('Error saving notes:', e);
                     this.updateSaveStatus('Error saving changes');
                 }
+            }
+
+            setupAutoBackup() {
+                // Auto-backup every 30 seconds if there are changes
+                setInterval(() => {
+                    const currentTime = Date.now();
+                    const noteCount = Object.keys(this.notes).length;
+                    
+                    if (noteCount > 0 && currentTime - this.lastBackupTime > this.backupInterval) {
+                        this.autoBackupNotes();
+                    }
+                }, 10000); // Check every 10 seconds
+            }
+
+            triggerAutoBackup() {
+                // Trigger backup after changes, but not too frequently
+                clearTimeout(this.autoBackupTimeout);
+                this.autoBackupTimeout = setTimeout(() => {
+                    this.autoBackupNotes();
+                }, 5000); // Backup 5 seconds after last change
+            }
+
+            autoBackupNotes() {
+                const currentTime = Date.now();
+                const noteCount = Object.keys(this.notes).length;
+                
+                if (noteCount === 0) return;
+                
+                // Don't backup too frequently
+                if (currentTime - this.lastBackupTime < 30000) return;
+                
+                const backupData = {
+                    backup_timestamp: new Date().toISOString(),
+                    backup_date: new Date().toLocaleString(),
+                    notes_count: noteCount,
+                    notes: this.notes,
+                    app_version: "1.0"
+                };
+                
+                const content = JSON.stringify(backupData, null, 2);
+                const blob = new Blob([content], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `notes_auto_backup_${new Date().toISOString().split('T')[0]}.json`;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                this.lastBackupTime = currentTime;
+                this.updateSaveStatus('Auto-backup completed');
+                
+                // Reset status after 3 seconds
+                setTimeout(() => {
+                    this.updateSaveStatus('All changes saved');
+                }, 3000);
             }
 
             generateId() {
@@ -637,6 +706,34 @@
                 a.click();
                 URL.revokeObjectURL(url);
             }
+
+            importNotes(fileContent) {
+                try {
+                    const data = JSON.parse(fileContent);
+                    const importedNotes = data.notes || data;
+                    
+                    // Merge with existing notes
+                    let importCount = 0;
+                    for (const [id, note] of Object.entries(importedNotes)) {
+                        if (!this.notes[id]) {
+                            this.notes[id] = note;
+                            importCount++;
+                        }
+                    }
+                    
+                    this.saveNotes();
+                    this.renderNotesList();
+                    this.updateSaveStatus(`Imported ${importCount} notes`);
+                    
+                    setTimeout(() => {
+                        this.updateSaveStatus('All changes saved');
+                    }, 3000);
+                    
+                } catch (e) {
+                    console.error('Error importing notes:', e);
+                    alert('Error importing notes. Please check the file format.');
+                }
+            }
         }
 
         // Initialize the app
@@ -664,8 +761,21 @@
             app.exportNote(app.notes[app.currentNoteId]);
         }
 
-        function exportAllNotes() {
-            app.exportAllNotes();
+        function importNotes() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    app.importNotes(e.target.result);
+                };
+                reader.readAsText(file);
+            };
+            input.click();
         }
 
         function filterNotes(query) {
