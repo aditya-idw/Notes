@@ -416,14 +416,16 @@
                         🔄 Sync to GitHub
                     </button>
                     
-                    <details class="github-setup">
+                    <details class="github-setup" open>
                         <summary>⚙️ GitHub Sync Setup</summary>
                         <input type="text" id="githubToken" placeholder="GitHub Personal Access Token" 
-                               value="" onchange="app.saveGitHubConfig()">
+                               value="" onchange="app.saveGitHubConfig()" oninput="app.saveGitHubConfig()">
                         <input type="text" id="githubRepo" placeholder="username/repo-name (e.g., aditya-idw/notes-storage)" 
-                               value="" onchange="app.saveGitHubConfig()">
+                               value="" onchange="app.saveGitHubConfig()" oninput="app.saveGitHubConfig()">
                         <div style="font-size: 0.8rem; color: #64748b; margin-top: 8px;">
                             <a href="#" onclick="app.showGitHubSetupGuide(); return false;">📖 How to set up GitHub sync</a>
+                            <br>
+                            <span style="color: #10b981;">🔒 Your credentials are saved locally and never shared</span>
                         </div>
                         <div id="syncStatus" class="sync-status"></div>
                     </details>
@@ -771,24 +773,46 @@
             }
 
             saveGitHubConfig() {
-                const token = document.getElementById('githubToken').value;
-                const repo = document.getElementById('githubRepo').value;
+                const token = document.getElementById('githubToken').value.trim();
+                const repo = document.getElementById('githubRepo').value.trim();
                 
                 this.githubConfig = { token, repo };
-                localStorage.setItem('githubConfig', JSON.stringify(this.githubConfig));
                 
-                if (token && repo) {
-                    this.updateSyncStatus('Configuration saved', 'success');
+                try {
+                    localStorage.setItem('githubConfig', JSON.stringify(this.githubConfig));
+                    
+                    if (token && repo) {
+                        this.updateSyncStatus('✓ Configuration saved', 'success');
+                        console.log('GitHub config saved:', { repo, tokenLength: token.length });
+                        
+                        setTimeout(() => {
+                            this.updateSyncStatus('Ready to sync', '');
+                        }, 2000);
+                    } else {
+                        this.updateSyncStatus('Configuration cleared', '');
+                    }
+                } catch (e) {
+                    console.error('Error saving GitHub config:', e);
+                    this.updateSyncStatus('Error saving configuration', 'error');
                 }
             }
 
             loadGitHubConfigUI() {
+                // Load saved config into UI fields
                 setTimeout(() => {
                     const tokenInput = document.getElementById('githubToken');
                     const repoInput = document.getElementById('githubRepo');
                     if (tokenInput && repoInput) {
                         tokenInput.value = this.githubConfig.token || '';
                         repoInput.value = this.githubConfig.repo || '';
+                        
+                        // Show status if config is loaded
+                        if (this.githubConfig.token && this.githubConfig.repo) {
+                            this.updateSyncStatus('✓ Configuration loaded', 'success');
+                            setTimeout(() => {
+                                this.updateSyncStatus('Ready to sync', '');
+                            }, 2000);
+                        }
                     }
                 }, 100);
             }
