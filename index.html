@@ -412,7 +412,7 @@
                     <button class="btn btn-secondary" onclick="app.manualBackup()">
                         💾 Local Backup
                     </button>
-                    <button class="btn export-btn" onclick="app.syncToGitHub()">
+                    <button class="btn export-btn" onclick="syncToGitHub()">
                         🔄 Sync to GitHub
                     </button>
                     
@@ -420,7 +420,7 @@
                         <summary>⚙️ GitHub Sync Setup</summary>
                         <input type="text" id="githubToken" placeholder="GitHub Personal Access Token" 
                                value="" onchange="app.saveGitHubConfig()">
-                        <input type="text" id="githubRepo" placeholder="username/repo-name" 
+                        <input type="text" id="githubRepo" placeholder="username/repo-name (e.g., aditya-idw/notes-storage)" 
                                value="" onchange="app.saveGitHubConfig()">
                         <div style="font-size: 0.8rem; color: #64748b; margin-top: 8px;">
                             <a href="#" onclick="app.showGitHubSetupGuide(); return false;">📖 How to set up GitHub sync</a>
@@ -447,6 +447,9 @@
                             </button>
                             <button class="btn btn-secondary" onclick="exportCurrentNote()">
                                 💾 Export
+                            </button>
+                            <button class="btn btn-secondary" onclick="app.syncFromGitHub()">
+                                ⬇️ Load from GitHub
                             </button>
                             <button class="btn btn-danger" onclick="deleteCurrentNote()">
                                 🗑️ Delete
@@ -485,13 +488,11 @@
                 this.notes = {};
                 this.currentNoteId = null;
                 this.saveTimeout = null;
-                this.autoBackupTimeout = null;
-                this.lastBackupTime = 0;
-                this.backupInterval = 30000; // 30 seconds
+                this.githubConfig = this.loadGitHubConfig();
                 this.loadNotes();
                 this.renderNotesList();
                 this.setupAutoSave();
-                this.setupAutoBackup();
+                this.loadGitHubConfigUI();
             }
 
             loadNotes() {
@@ -510,88 +511,10 @@
                 try {
                     window.localStorage.setItem('personalNotes', JSON.stringify(this.notes));
                     this.updateSaveStatus('All changes saved');
-                    this.triggerAutoBackup();
                 } catch (e) {
                     console.error('Error saving notes:', e);
                     this.updateSaveStatus('Error saving changes');
                 }
-            }
-
-            setupAutoBackup() {
-                // Show backup reminder occasionally
-                this.lastBackupReminder = parseInt(localStorage.getItem('lastBackupReminder') || '0');
-                this.checkBackupReminder();
-            }
-
-            triggerAutoBackup() {
-                // Instead of auto-downloading, show a backup reminder when needed
-                this.checkBackupReminder();
-            }
-
-            checkBackupReminder() {
-                const currentTime = Date.now();
-                const noteCount = Object.keys(this.notes).length;
-                const oneHour = 60 * 60 * 1000;
-                
-                // Show reminder if:
-                // - Have notes AND
-                // - Haven't shown reminder in last hour AND  
-                // - Have made changes recently
-                if (noteCount > 0 && 
-                    currentTime - this.lastBackupReminder > oneHour &&
-                    this.hasRecentChanges()) {
-                    
-                    this.showBackupReminder();
-                    this.lastBackupReminder = currentTime;
-                    localStorage.setItem('lastBackupReminder', currentTime.toString());
-                }
-            }
-
-            hasRecentChanges() {
-                const oneHour = 60 * 60 * 1000;
-                const currentTime = Date.now();
-                
-                return Object.values(this.notes).some(note => 
-                    currentTime - new Date(note.modified).getTime() < oneHour
-                );
-            }
-
-            showBackupReminder() {
-                const noteCount = Object.keys(this.notes).length;
-                const reminder = document.createElement('div');
-                reminder.style.cssText = `
-                    position: fixed; top: 20px; right: 20px; z-index: 1001;
-                    background: linear-gradient(135deg, #10b981, #059669);
-                    color: white; padding: 15px 20px; border-radius: 12px;
-                    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-                    max-width: 300px; font-size: 14px;
-                    animation: slideIn 0.3s ease;
-                `;
-                
-                reminder.innerHTML = `
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <span>💾</span>
-                        <div>
-                            <strong>Backup Reminder</strong><br>
-                            You have ${noteCount} notes. Consider backing up!
-                        </div>
-                        <button onclick="this.parentElement.parentElement.remove(); app.manualBackup();" 
-                                style="background: rgba(255,255,255,0.2); border: none; color: white; 
-                                       padding: 5px 10px; border-radius: 6px; cursor: pointer; margin-left: 10px;">
-                            Backup Now
-                        </button>
-                    </div>
-                `;
-                
-                document.body.appendChild(reminder);
-                
-                // Auto-hide after 10 seconds
-                setTimeout(() => {
-                    if (reminder.parentElement) {
-                        reminder.style.animation = 'slideOut 0.3s ease';
-                        setTimeout(() => reminder.remove(), 300);
-                    }
-                }, 10000);
             }
 
             manualBackup() {
@@ -839,6 +762,196 @@
                     console.error('Error importing notes:', e);
                     alert('Error importing notes. Please check the file format.');
                 }
+            }
+
+            // GitHub Integration
+            loadGitHubConfig() {
+                const config = localStorage.getItem('githubConfig');
+                return config ? JSON.parse(config) : { token: '', repo: '' };
+            }
+
+            saveGitHubConfig() {
+                const token = document.getElementById('githubToken').value;
+                const repo = document.getElementById('githubRepo').value;
+                
+                this.githubConfig = { token, repo };
+                localStorage.setItem('githubConfig', JSON.stringify(this.githubConfig));
+                
+                if (token && repo) {
+                    this.updateSyncStatus('Configuration saved', 'success');
+                }
+            }
+
+            loadGitHubConfigUI() {
+                setTimeout(() => {
+                    const tokenInput = document.getElementById('githubToken');
+                    const repoInput = document.getElementById('githubRepo');
+                    if (tokenInput && repoInput) {
+                        tokenInput.value = this.githubConfig.token || '';
+                        repoInput.value = this.githubConfig.repo || '';
+                    }
+                }, 100);
+            }
+
+            async syncToGitHub() {
+                if (!this.githubConfig.token || !this.githubConfig.repo) {
+                    alert('Please configure GitHub token and repository first.');
+                    return;
+                }
+
+                console.log('Starting GitHub sync...');
+                this.updateSyncStatus('Syncing to GitHub...', 'syncing');
+
+                try {
+                    // First, try to get existing file to check if repo exists
+                    console.log(`Checking repository: ${this.githubConfig.repo}`);
+                    await this.checkGitHubRepo();
+                    
+                    // Prepare backup data
+                    const backupData = {
+                        backup_timestamp: new Date().toISOString(),
+                        backup_date: new Date().toLocaleString(),
+                        notes_count: Object.keys(this.notes).length,
+                        notes: this.notes,
+                        app_version: "1.0",
+                        sync_method: "github"
+                    };
+
+                    console.log(`Backing up ${backupData.notes_count} notes`);
+
+                    // Get current file SHA if it exists (required for updates)
+                    let sha = null;
+                    try {
+                        const existingFile = await this.getGitHubFile();
+                        sha = existingFile.sha;
+                        console.log('Found existing backup file, updating...');
+                    } catch (e) {
+                        console.log('No existing backup file, creating new...');
+                    }
+
+                    // Upload to GitHub
+                    const url = `https://api.github.com/repos/${this.githubConfig.repo}/contents/notes-backup.json`;
+                    console.log(`Uploading to: ${url}`);
+                    
+                    const response = await fetch(url, {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `token ${this.githubConfig.token}`,
+                            'Content-Type': 'application/json',
+                            'User-Agent': 'Notes-App'
+                        },
+                        body: JSON.stringify({
+                            message: `Update notes backup - ${new Date().toLocaleString()}`,
+                            content: btoa(JSON.stringify(backupData, null, 2)),
+                            sha: sha
+                        })
+                    });
+
+                    console.log('GitHub API response status:', response.status);
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        console.log('Upload successful:', result);
+                        this.updateSyncStatus('✓ Synced to GitHub successfully', 'success');
+                        localStorage.setItem('lastGitHubSync', new Date().toISOString());
+                    } else {
+                        const errorText = await response.text();
+                        console.error('GitHub API error:', response.status, errorText);
+                        throw new Error(`GitHub API error (${response.status}): ${errorText}`);
+                    }
+
+                } catch (error) {
+                    console.error('GitHub sync error:', error);
+                    this.updateSyncStatus(`✗ Sync failed: ${error.message}`, 'error');
+                }
+            }
+
+            async checkGitHubRepo() {
+                const response = await fetch(`https://api.github.com/repos/${this.githubConfig.repo}`, {
+                    headers: {
+                        'Authorization': `token ${this.githubConfig.token}`,
+                    }
+                });
+
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        throw new Error('Repository not found. Make sure it exists and token has access.');
+                    }
+                    throw new Error('Cannot access repository. Check token permissions.');
+                }
+            }
+
+            async getGitHubFile() {
+                const response = await fetch(`https://api.github.com/repos/${this.githubConfig.repo}/contents/notes-backup.json`, {
+                    headers: {
+                        'Authorization': `token ${this.githubConfig.token}`,
+                    }
+                });
+
+                if (response.ok) {
+                    return await response.json();
+                }
+                throw new Error('File not found');
+            }
+
+            async syncFromGitHub() {
+                if (!this.githubConfig.token || !this.githubConfig.repo) {
+                    alert('Please configure GitHub token and repository first.');
+                    return;
+                }
+
+                this.updateSyncStatus('Loading from GitHub...', 'syncing');
+
+                try {
+                    const fileData = await this.getGitHubFile();
+                    const content = atob(fileData.content);
+                    const backupData = JSON.parse(content);
+
+                    // Import the notes
+                    this.importNotes(content);
+                    this.updateSyncStatus('✓ Loaded from GitHub successfully', 'success');
+
+                } catch (error) {
+                    console.error('GitHub load error:', error);
+                    this.updateSyncStatus(`✗ Load failed: ${error.message}`, 'error');
+                }
+            }
+
+            updateSyncStatus(message, type = '') {
+                const statusEl = document.getElementById('syncStatus');
+                if (statusEl) {
+                    statusEl.textContent = message;
+                    statusEl.className = `sync-status ${type}`;
+                    
+                    if (type === 'success' || type === 'error') {
+                        setTimeout(() => {
+                            statusEl.textContent = '';
+                            statusEl.className = 'sync-status';
+                        }, 5000);
+                    }
+                }
+            }
+
+            showGitHubSetupGuide() {
+                alert(`GitHub Sync Setup Guide:
+
+1. Create a private repository on GitHub (e.g., "my-notes-backup")
+
+2. Generate a Personal Access Token:
+   • Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+   • Click "Generate new token (classic)"
+   • Select scopes: "repo" (full repository access)
+   • Copy the token
+
+3. Enter your details:
+   • Token: paste the token you just created
+   • Repo: username/repository-name (e.g., "john/my-notes-backup")
+
+4. Click "Sync to GitHub" to backup
+   • Your notes will be saved as "notes-backup.json" in the repository
+   • You can manually download this file anytime from GitHub
+
+Security: Your token is stored locally in your browser and only used to access your specified repository.`);
             }
         }
 
